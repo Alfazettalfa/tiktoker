@@ -1,4 +1,9 @@
-const puppeteer = require('puppeteer')
+const puppeteer = require('puppeteer-extra')
+const StealthPlugin = require('puppeteer-extra-plugin-stealth')
+
+const captcha = require("./captcha")
+
+puppeteer.use(StealthPlugin())
 const session = {}
 var browser
 
@@ -6,17 +11,22 @@ module.exports = {
     init: async headless => {
         return new Promise(async resolve => {
             browser = await puppeteer.launch({
-                product: 'firefox',
                 headless: headless,
                 defaultViewport: null,
                 args: [
                     '--no-sandbox',
                     "--remote-debugging-port=0",
-                    "--auto-open-devtools-for-tabs"
+                    `--window-size=800,900`,
+                    //"--auto-open-devtools-for-tabs"
                 ]
             })
             .catch(err => {
                 console.log(err);
+            })
+
+            browser.on("targetcreated", async () => {
+                const page = await activeTab()
+                captcha.dedect(page)
             })
 
             console.log("Scraper initiated");
@@ -34,6 +44,7 @@ module.exports = {
 
             if (mode == "trends") {
                 const trends = await getTrends()
+
                 const chosenTrend = trends[Math.round(Math.random() * trends.length - 1)]
 
                 links = await getVideos(chosenTrend)
@@ -43,6 +54,7 @@ module.exports = {
                 links = await getStartpage()
             }
 
+            console.log(links);
             console.log(`${links.length} video candidates`);
             
             if (links.length > 0) {
@@ -76,7 +88,10 @@ module.exports = {
             browser.close()
 
             console.log("Scraper Closed");
-            resolve(true)
+            
+            setTimeout(() => {
+                resolve(true)
+            }, 3000);
         })
     },
     getVideoSource: url => {
@@ -96,6 +111,14 @@ module.exports = {
         const meta = await analyzeVideo("https://www.tiktok.com/@imgriffinjohnson/video/6827892555624025350")
         console.log(meta);
     }
+}
+
+function activeTab() {
+    return new Promise(async resolve => {
+        const pages = await browser.pages()
+
+        resolve(pages[pages.length - 1])
+    })
 }
 
 function getStartpage() {
@@ -231,17 +254,19 @@ function analyzeVideo(link) {
             const comments = panel.children[1].children[1].innerHTML
             const videoTitle = document.title.split(document.title.indexOf("#"))[0]
             const videoMusic = document.getElementsByClassName("music-title-decoration")[0].innerText
+            const creator = document.getElementsByClassName("author-uniqueId")[0].innerHTML
 
             console.log(likes, comments);
 
-            return [likes, comments, videoTitle, videoMusic]
+            return [likes, comments, videoTitle, videoMusic, creator]
         })
 
 
 
         const stats = {
             link: link,
-            title: parseTitle(metadata[2], metadata[3]),
+            title: parseTitle(metadata[2], metadata[3], metadata[4]),
+            creator: metadata[4],
             tags: parseTags(metadata[2]),
             likes: parseNumber(metadata[0]),
             comments: parseNumber(metadata[1]),
@@ -252,7 +277,7 @@ function analyzeVideo(link) {
     })
 }
 
-function parseTitle(title, music) {
+function parseTitle(title, musicRaw, creator) {
     const words = title.split(" ")
     const clean = []
 
@@ -262,9 +287,15 @@ function parseTitle(title, music) {
         }
     })
 
-    const stringed = clean.join(" ")
+    const stringed = removeIllegalChars(clean.join(" "))
+    const music = removeIllegalChars(musicRaw)
 
-    return `${removeIllegalChars(stringed)} | ${removeIllegalChars(music)}`
+    if (stringed.length > 4) {
+        return `${stringed} | ${music}`
+    }
+    else {
+        return `${creator} | ${music}`
+    }
 }
 
 function removeIllegalChars(string) {
@@ -316,14 +347,16 @@ function parseNumber(str) {
 
 function getVideos(link) {
     return new Promise(async resolve => {
-        console.log("getting video links");
+        console.log("getting video links: " + link);
 
         session.page.goto(link)
-        await session.page.waitForNavigation({ timeout: 3000})
+        await session.page.waitForNavigation({ timeout: 5000})
             .catch(err => {
                 console.log("->");
             })
 
+        await captcha.isBusy()
+        
         await session.page.waitForSelector(".video-feed-item")
             .catch(err => {
                 console.log("video-feed-item ->");
@@ -340,7 +373,10 @@ function getVideos(link) {
                     console.log(trendingVideo);
                     try {
                         const link = trendingVideo.childNodes[0].childNodes[0].childNodes[0].childNodes[0].href
-                        videoLinks.push(link)
+                        
+                        if (link != null) {
+                            videoLinks.push(link)
+                        }
                     }
                     catch {
                         console.log("Failed to aquire video link, skipping...");
@@ -362,11 +398,14 @@ function getTrends() {
     return new Promise(async resolve => {
         console.log("getting trends");
 
+        console.log("loading page");
         session.page.goto("https://www.tiktok.com/")
         await session.page.waitForNavigation({ timeout: 10000})
             .catch(err => {
                 console.log("->");
             })
+        
+        console.log("waiting");
 
         await session.page.waitForSelector(".discover-list")
 
@@ -378,7 +417,9 @@ function getTrends() {
 
             for (const trend of trends) {
                 if (!trend.href.includes("/discover/")) {
-                    links.push(trend.href)
+                    if (trend != null) {
+                        links.push(trend.href)
+                    }
                 }
             }
 

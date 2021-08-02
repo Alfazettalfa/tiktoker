@@ -13,6 +13,7 @@
     "download": "^8.0.0",
     "puppeteer": "^5.5.0",
     "stream": "0.0.2",
+    "tree-kill": "^1.2.2",
     "youtube-videos-uploader": "^1.3.4"
   }
 }
