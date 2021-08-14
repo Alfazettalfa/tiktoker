@@ -2,28 +2,21 @@ const scraper = require("./src/scraper")
 const fs = require('fs');
 const uploader = require("./src/uploader");
 
+
 const headless = false
 
-function min(m) {
-    let mins = 0
-
-    return new Promise(resolve => {
-        console.log(`waiting for ${m} minutes`);
-
-        const timerInterval = setInterval(() => {
-            mins += 1
-            console.log(`waiting for ${m - mins} more minutes`);
-
-            if (mins >= m) {
-                clearInterval(timerInterval)
-                resolve()
-            }
-        }, 60000);
+function sleep(ms) {
+    return new Promise(async resolve => {
+        setTimeout(() => {
+            resolve()
+        }, ms);
     })
 }
 
 async function init() {
     var mode = "trends"
+
+    console.log(`[${process.pid}]`);
 
     while (true) {
         await upload(mode)
@@ -52,12 +45,14 @@ async function upload(mode) {
             if (video.metadata.likes > 10000) {
                 if (!prevUploads.includes(video.metadata.link)) {
                     const links = await uploader.upload(video.metadata)
+                    
+                    console.log("Video Uploaded, waiting one Hour");
+
                     if (links[0] != false) {
                         prevUploads.push(video.metadata.link)
                     }
                     else {
                         console.log("Upload Limit reached, waiting 4 Hours");
-                        await min(240)
                     }
                 }
                 else {

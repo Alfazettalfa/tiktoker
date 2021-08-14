@@ -18,10 +18,17 @@ async function init() {
         console.log("[handler] Killing scraper...");
         restarting = true
 
-        kill(scraper.pid);
+        await kill(scraper.pid);
         await sleep(3000)
     }
 
+    try {
+        scraper.removeAllListeners();
+    }
+    catch {
+        console.log("[H] No event listeners registered");
+    }
+    
     scraper = spawner("node ./index.js")
 
     scraper.stdout.on('data', async buffer => {
@@ -46,6 +53,8 @@ async function init() {
 
         if (!crashed.includes(scraper.pid)) {
             fs.appendFileSync("./data/errors.txt", data)
+            fs.appendFileSync("./data/errors.txt", "\n\n---------------------------------------------------------------------------------------\n\n")
+            
             crashed.push(scraper.pid)
             init()
         }
@@ -54,6 +63,8 @@ async function init() {
 
 function spawner(command) {
     const process = cp.spawn(command, [], { shell: true })
+
+    console.log(`Started process [${process.pid}]`);
 
     return process
 }

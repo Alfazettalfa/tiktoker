@@ -1,5 +1,6 @@
 const puppeteer = require('puppeteer-extra')
 const StealthPlugin = require('puppeteer-extra-plugin-stealth')
+const registry = require("./registry")
 
 const captcha = require("./captcha")
 
@@ -23,6 +24,14 @@ module.exports = {
             .catch(err => {
                 console.log(err);
             })
+
+            try {
+                browser.removeAllListeners()
+            }
+            catch {
+                console.log("[S] No event listeners registered");
+            }
+            
 
             browser.on("targetcreated", async () => {
                 const page = await activeTab()
@@ -66,6 +75,8 @@ module.exports = {
                     console.log("title: ", video.title);
                     console.log("likes: ", video.likes);
 
+                    registry.register(video)
+
                     videos.push(video)
                 }
 
@@ -85,13 +96,17 @@ module.exports = {
     },
     close: async () => {
         return new Promise(async resolve => {
-            browser.close()
+            console.log("closing scraper");
+            await browser.close()
+                .catch(err => {
+                    console.log(err);
+                })
 
             console.log("Scraper Closed");
             
             setTimeout(() => {
                 resolve(true)
-            }, 3000);
+            }, 1000);
         })
     },
     getVideoSource: url => {
@@ -104,12 +119,25 @@ module.exports = {
     analyzeVideo: src => {
         return new Promise (async resolve => {
             const stats = await analyzeVideo(src)
-            console.log(stats);
+            resolve(stats)
         })
     },
     debug: async () => {
         const meta = await analyzeVideo("https://www.tiktok.com/@imgriffinjohnson/video/6827892555624025350")
         console.log(meta);
+    },
+    downloadVideoURL: url => {
+        return new Promise(async resolve => {
+            const source = await getVideoSource(url)
+
+            const video = await downloadVideo(source)
+            const metadata = await analyzeVideo(url)
+
+            resolve({
+                metadata: metadata,
+                file: video
+            })
+        })
     }
 }
 
@@ -254,13 +282,12 @@ function analyzeVideo(link) {
             const comments = panel.children[1].children[1].innerHTML
             const videoTitle = document.title.split(document.title.indexOf("#"))[0]
             const videoMusic = document.getElementsByClassName("music-title-decoration")[0].innerText
-            const creator = document.getElementsByClassName("author-uniqueId")[0].innerHTML
+            const creator = document.getElementsByClassName("author-uniqueId")[0].childNodes[0].textContent.replace(/"/g, "")
 
             console.log(likes, comments);
 
             return [likes, comments, videoTitle, videoMusic, creator]
         })
-
 
 
         const stats = {
@@ -270,7 +297,8 @@ function analyzeVideo(link) {
             tags: parseTags(metadata[2]),
             likes: parseNumber(metadata[0]),
             comments: parseNumber(metadata[1]),
-            description: `#shorts - creator on TikTok: ${link} - Find more on `
+            description: `#shorts - creator on TikTok: ${link} - Find more on `,
+            music: removeIllegalChars( metadata[3])
         }
 
         resolve(stats)
@@ -281,6 +309,9 @@ function parseTitle(title, musicRaw, creator) {
     const words = title.split(" ")
     const clean = []
 
+    //optional mode for shorter title -> test performance
+    const shortTitleMode = true
+
     words.forEach((word, index) => {
         if (!word.includes("#")) {
            clean.push(word)
@@ -289,6 +320,10 @@ function parseTitle(title, musicRaw, creator) {
 
     const stringed = removeIllegalChars(clean.join(" "))
     const music = removeIllegalChars(musicRaw)
+
+    if (shortTitleMode) {
+        return stringed
+    }
 
     if (stringed.length > 4) {
         return `${stringed} | ${music}`
@@ -350,6 +385,9 @@ function getVideos(link) {
         console.log("getting video links: " + link);
 
         session.page.goto(link)
+            .catch(err => {
+                console.log(err);
+            })
         await session.page.waitForNavigation({ timeout: 5000})
             .catch(err => {
                 console.log("->");

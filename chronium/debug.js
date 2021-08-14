@@ -1,22 +1,28 @@
-const puppeteer = require("puppeteer-extra");
-const stealthPlugin = require("puppeteer-extra-plugin-stealth")();
+const scraper = require("./src/scraper")
+const registry = require("./src/registry")
 
-["chrome.runtime", "navigator.languages"].forEach(a =>
-  stealthPlugin.enabledEvasions.delete(a)
-);
+async function analyze() {
+  await scraper.init(false)
 
-puppeteer.use(stealthPlugin);
+  const stats = await scraper.analyzeVideo("https://www.tiktok.com/@charlidamelio/video/6808282941966306565")
+  await scraper.close()
 
-main();
-async function main() {
-  const browser = await puppeteer.launch({
-      headless: false
-  });
-  const page = await browser.newPage();
+  console.log(stats);
+} 
 
-  await page.evaluateOnNewDocument(() => {
-    delete navigator.__proto__.webdriver;
-  });
+async function register() {
+  await scraper.init(false)
 
-  await page.goto(`https://www.tiktok.com/@miss_extra2.0`);
+  const stats = await scraper.analyzeVideo("https://www.tiktok.com/@charlidamelio/video/6808282941966306565")
+  await scraper.close()
+
+  console.log(stats);
+  registry.register(stats)
 }
+
+function analyzeRegistry() {
+  const data = registry.orderBy("music")
+  console.log(data);
+}
+
+analyzeRegistry()

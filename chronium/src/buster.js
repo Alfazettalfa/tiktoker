@@ -1,4 +1,5 @@
 var Jimp = require('jimp');
+const fs = require('fs');
 
 const download = require("./downloader");
 
@@ -17,22 +18,45 @@ function solve(url) {
 
 module.exports = {
     solve: url => {
-        return new Promise(async (resolve, reject) => {
+        return new Promise(async resolve => {
             const percentage = await solve(url)
             resolve(percentage)
         })
+    },
+    test: () => {
+        test()
+    },
+    debug: () => {
+        debug()
     }
 }
 
 async function debug() {
-    const percentage = await solve("https://p16-security-va.ibyteimg.com/img/security-captcha-oversea-usa/slide_3e45cf8f3963f31ae7e607c27b4b719814a2163e_1_1.jpg~tplv-obj.image")
-    console.log(percentage);
+    const sample = "5.jpg"
+
+    const data = await Jimp.read(`./samples/${sample}`)
+    const result = analyze(data);
+
+    result.data.write(`./analyzed/${sample}`)
+}
+
+async function test() {
+    const samples = fs.readdirSync("./samples")
+
+    samples.forEach(async sample => {
+        const data = await Jimp.read(`./samples/${sample}`)
+        const result = analyze(data);
+
+        result.data.write(`./analyzed/${sample}`)
+
+        console.log(`${sample}: ${result.percent}%`);
+    })
 }
 
 function analyze(data) {
     const width = data.bitmap.width;
     const height = data.bitmap.height;
-    const hitsX = []
+    const hits = []
 
     for (x = 0; x < width; x++) {
         for (y = 0; y < height; y++) {
@@ -42,53 +66,51 @@ function analyze(data) {
             const factor = rgb.r + rgb.g + rgb.b
             
             if (factor > 700) {
-                hitsX.push(x)
+                hits.push({x: x, y: y})
 
-                const marker = Jimp.rgbaToInt(255 - x, 0, x / 2, 255)
+                const marker = Jimp.rgbaToInt(255 - x / 2, 0, x / 2, 255)
                 data.setPixelColor(marker, x, y)
             }
         }
     }
 
-    const frontBorderX = getFrontBorder(hitsX)
-    const backBorderX = hitsX[hitsX.length - 1]
-    const percent = Math.round(frontBorderX * 100 / width)
+    const frontBorder = getBorder(hits)
+    const backBorder = getBorder(hits.reverse())
+    const percent = Math.round(frontBorder.x * 100 / width)
 
     for (y = 0; y < height; y++) {
         const marker = Jimp.rgbaToInt(255, 0, 0, 255)
-        data.setPixelColor(marker, frontBorderX, y)
-    }
-    for (y = 0; y < height; y++) {
-        const marker = Jimp.rgbaToInt(255, 0, 0, 255)
-        data.setPixelColor(marker, backBorderX, y)
-    }
 
+        data.setPixelColor(marker, frontBorder.x, y)
+        data.setPixelColor(marker, backBorder.x, y)
+    }
 
     return {data: data, percent: percent};
 }
 
 
-//get the front border of the puzzle shape
-function getFrontBorder(hits) {
-    hits.forEach(hit => {
-        const occurrences = arrayDublicates(hit, hits)
+function getBorder(hits) {
+    const lineTreshold = 10
+
+    for (hit of hits) {
+        const lineLength = dedectX(hits, hit)
         
-        if (occurrences > 10) {
+        if (lineLength > lineTreshold) {
             return hit
         }
-    })
+    }
 
-    return hits[0]
+    return false
 }
 
-function arrayDublicates(target, array) {
-    let occurrences = 0
+function dedectX(hits, target) {
+    let line = 0
 
-    array.forEach(value => {
-        if (value == target) {
-            occurrences += 1
+    hits.forEach(hit => {
+        if (hit.x == target.x) {
+            line += 1
         }
     })
 
-    return occurrences
+    return line
 }

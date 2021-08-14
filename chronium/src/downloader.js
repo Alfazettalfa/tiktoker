@@ -9,7 +9,7 @@ var downloader = function(uri, filename, callback){
 
 function download(url) {
   return new Promise((resolve, reject) => {
-    downloader(url, './captchas/download.jpg', () => { 
+    downloader(url, './captchas/download.jpg', () => {
       console.log("downloading complete");
       resolve(true)
     });
