@@ -1,5 +1,5 @@
 const {upload} = require('youtube-videos-uploader');
-const credentials = { email: 'verionsync@gmail.com', pass: 'scheissakw'}
+const credentials = { email: 'verionsync@gmail.com', pass: ''}
 
 const video1 = {
     path: 'sample.mp4',
