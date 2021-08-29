@@ -5,8 +5,8 @@ module.exports = {
     register: (video) => {
         register(video)
     },
-    get: () => {
-        return get()
+    get: query => {
+        return get(query)
     },
     orderBy: (node) => {
         return orderBy(node)
@@ -41,15 +41,34 @@ function register(video) {
         const current = get()
         const currentStringed = JSON.stringify(current)
 
-        if (!currentStringed.includes(video.link)) {
-            current.push(video)
-            set(current)
+        if (currentStringed.includes(video.link)) {
+            const index = current.indexOf(video);
+            current.splice(index, 1);
         }
+
+        current.push(video)
+        set(current)
     })
 }
 
-function get() {
-    return JSON.parse(fs.readFileSync(file))
+function get(query) {
+    if (!query) {
+        return JSON.parse(fs.readFileSync(file))
+    }
+
+    const sets = JSON.parse(fs.readFileSync(file))
+    const result = []
+
+    const key = query.split(":")[0]
+    const value = query.split(":")[1]
+
+    for (const set of sets) {
+        if (set[key] == value) {
+            result.push(set)
+        }
+    }
+
+    return result
 }
 
 function set(data) {

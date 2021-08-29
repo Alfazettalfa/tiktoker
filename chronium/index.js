@@ -1,9 +1,15 @@
-const scraper = require("./src/scraper")
 const fs = require('fs');
+
+const scraper = require("./src/scraper")
 const uploader = require("./src/uploader");
+const compilation = require("./src/compilations");
+const { resolve4 } = require('dns');
 
 
 const headless = false
+const dayTrackerFile = "./data/day.txt"
+const compilationPath = "./temp/compilation/render.mp4"
+
 
 function sleep(ms) {
     return new Promise(async resolve => {
@@ -15,22 +21,49 @@ function sleep(ms) {
 
 async function init() {
     var mode = "trends"
-
-    console.log(`[${process.pid}]`);
+    await uploadCompilation()
 
     while (true) {
-        await upload(mode)
+        await uploadShort(mode)
 
         if (mode == "startpage") {
-            mode = "trends"
+            //mode = "trends"
         }
         else {
-            mode = "startpage"
+            //mode = "startpage"
         }
     }
 }
 
-async function upload(mode) {
+function uploadCompilation() {
+    return new Promise(async resolve => {
+        const date = new Date()
+        const currentDay = date.getDay()
+        const lastUploadDay = Number(fs.readFileSync(dayTrackerFile))
+
+        if (lastUploadDay != currentDay) {
+            console.log("Creating daily compilation...");
+            fs.writeFileSync(dayTrackerFile, String(currentDay))
+
+            const meta = await compilation.createCompilation(compilationPath)
+
+            const video = {
+                path: compilationPath,
+                title: `${meta.metadata.title} - ${meta.metadata.authorName} Viral TikToks Compilation`,
+                description: meta.description,
+                thumbnail: meta.thumbnail
+            }
+
+            console.log(video);
+
+            await uploader.upload(video)
+        }
+
+        resolve()
+    })
+}
+
+async function uploadShort(mode) {
     return new Promise(async resolve => {
         await scraper.init(headless)
         const prevUploads = JSON.parse(fs.readFileSync("./data/uploaded.json"))
@@ -103,7 +136,6 @@ async function debug() {
     await scraper.init()
 
     scraper.debug()
-
 }
 
 init()

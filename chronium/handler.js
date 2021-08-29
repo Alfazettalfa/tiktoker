@@ -51,13 +51,25 @@ async function init() {
 
         console.log(`[${crashed.length} | ${scraper.pid}] > ${data}`);
 
-        if (!crashed.includes(scraper.pid)) {
+        if (!crashed.includes(scraper.pid) && !data.includes("Possible EventEmitter memory leak detected.")) {
             fs.appendFileSync("./data/errors.txt", data)
             fs.appendFileSync("./data/errors.txt", "\n\n---------------------------------------------------------------------------------------\n\n")
             
             crashed.push(scraper.pid)
             init()
         }
+    })
+
+    scraper.stdout.on("error", buffer => {
+        var data = String(buffer)
+
+        if (data.match(/\n/g).length == 1) {
+            data = data.replace(/\n/g, "")
+        }
+        fs.appendFileSync("./data/errors.txt", "\n\n--------------------------stdout err-----------------------------------------------\n\n")
+        s.appendFileSync("./data/errors.txt", data)
+        fs.appendFileSync("./data/errors.txt", "\n\n--------------------------stdout err end-----------------------------------------------\n\n")
+
     })
 }
 

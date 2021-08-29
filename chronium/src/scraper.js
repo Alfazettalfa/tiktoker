@@ -1,8 +1,9 @@
 const puppeteer = require('puppeteer-extra')
 const StealthPlugin = require('puppeteer-extra-plugin-stealth')
-const registry = require("./registry")
 
 const captcha = require("./captcha")
+const registry = require("./registry")
+const trends = require('./trends')
 
 puppeteer.use(StealthPlugin())
 const session = {}
@@ -17,7 +18,7 @@ module.exports = {
                 args: [
                     '--no-sandbox',
                     "--remote-debugging-port=0",
-                    `--window-size=800,900`,
+                    `--window-size=900,900`,
                     //"--auto-open-devtools-for-tabs"
                 ]
             })
@@ -52,18 +53,16 @@ module.exports = {
             
 
             if (mode == "trends") {
-                const trends = await getTrends()
+                const currentTrends = await trends.songs()
+                const chosenTrend = currentTrends[Math.round(Math.random() * currentTrends.length - 1)]
 
-                const chosenTrend = trends[Math.round(Math.random() * trends.length - 1)]
-
-                links = await getVideos(chosenTrend)
+                links = await getVideos(chosenTrend.link, 10)
             }
 
             if (mode == "startpage") {
                 links = await getStartpage()
             }
 
-            console.log(links);
             console.log(`${links.length} video candidates`);
             
             if (links.length > 0) {
@@ -75,7 +74,7 @@ module.exports = {
                     console.log("title: ", video.title);
                     console.log("likes: ", video.likes);
 
-                    registry.register(video)
+                    //registry.register(video)
 
                     videos.push(video)
                 }
@@ -126,19 +125,81 @@ module.exports = {
         const meta = await analyzeVideo("https://www.tiktok.com/@imgriffinjohnson/video/6827892555624025350")
         console.log(meta);
     },
-    downloadVideoURL: url => {
+    downloadVideo: url => {
         return new Promise(async resolve => {
-            const source = await getVideoSource(url)
+            var source = url
+
+            if (!url.includes("web.tiktok.com")) {
+                source = await getVideoSource(url)
+            }
 
             const video = await downloadVideo(source)
-            const metadata = await analyzeVideo(url)
-
-            resolve({
-                metadata: metadata,
-                file: video
-            })
+            resolve(video)
+        })
+    },
+    getTrends: () => {
+        return new Promise(async resolve => {
+            const trends = await getTrends()
+            resolve(trends)
+        })
+    },
+    getVideos: (url, max) => {
+        return new Promise(async resolve => {
+            const videos = await getVideos(url, max)
+            resolve(videos)
         })
     }
+}
+
+//not used for now, maybe later
+function getCompilation(url, duration) {
+    console.log(`collecting videos \n target duration: ${duration}s \n link: ${url}`);
+
+    return new Promise(async resolve => {
+        session.page.goto(url)
+            .catch(err => {
+                console.log(err);
+            })
+        await session.page.waitForNavigation({ timeout: 5000})
+            .catch(err => {
+                console.log("->");
+            })
+
+        await captcha.isBusy()
+
+        await session.page.waitForSelector(".video-feed-item")
+            .catch(err => {
+                console.log("video-feed-item ->");
+            })
+
+        //waiting for pae to load, then scroll and wait again for videos to render
+        await session.page.evaluate(() => {
+            window.scrollTo({ top: 10000, behavior: 'smooth' })
+        })
+
+        await sleep(2000)
+        const registeredVideos = JSON.stringify(registry.get("type:compilation"))
+
+        const videos = await session.page.evaluate((registeredVideos) => {
+            const trendingVideos = document.getElementsByClassName("video-feed-item")
+            const videoLinks = []
+            
+            for (const video of trendingVideos) {
+                try {
+                    const link = video.childNodes[0].childNodes[0].childNodes[0].childNodes[0].href
+
+                    if (!registeredVideos.includes(link)) {
+                        videoLinks.push(link)
+                    }
+                }   
+                catch {
+                    console.log("Failed to aquire video link, skipping...");
+                }
+            }
+
+            return videoLinks
+        }, registeredVideos)
+    })
 }
 
 function activeTab() {
@@ -166,7 +227,7 @@ function getStartpage() {
         
         //waiting for pae to load, then scroll and wait again for videos to render
         await session.page.evaluate(() => {
-            window.scrollTo({ top: 6000, behavior: 'smooth' })
+            window.scrollTo({ top: 10000, behavior: 'smooth' })
         })
 
         await sleep(2000)
@@ -177,7 +238,7 @@ function getStartpage() {
             const videoLinks = []
             
             for (const trendingVideo of trendingVideos) {
-                if (videoLinks.length < 10) {
+                if (videoLinks.length < 20) {
                     console.log(trendingVideo);
                     try {
                         const link = trendingVideo.children[4].children[0].children[0].href
@@ -214,7 +275,10 @@ function downloadVideo(source) {
                 reader.onload = () => {
                     resolve(reader.result)
                 }
-                reader.onerror = () => reject('Error occurred while reading binary string');
+                reader.onerror = () => {
+                    reject('Error occurred while reading binary string');
+                    resolve(false)
+                }
             })
         }, source)
 
@@ -277,28 +341,32 @@ function analyzeVideo(link) {
 
         const metadata = await session.page.evaluate(() => {
             const panel = document.getElementsByClassName("pc-action-bar")[0]
+            const videoTag = document.getElementsByTagName("video")[0]
 
             const likes = panel.children[0].children[1].innerHTML
             const comments = panel.children[1].children[1].innerHTML
             const videoTitle = document.title.split(document.title.indexOf("#"))[0]
             const videoMusic = document.getElementsByClassName("music-title-decoration")[0].innerText
             const creator = document.getElementsByClassName("author-uniqueId")[0].childNodes[0].textContent.replace(/"/g, "")
+            const source = videoTag.src
 
             console.log(likes, comments);
 
-            return [likes, comments, videoTitle, videoMusic, creator]
+            return [likes, comments, videoTitle, videoMusic, creator, source]
         })
 
 
         const stats = {
             link: link,
+            source: metadata[5],
             title: parseTitle(metadata[2], metadata[3], metadata[4]),
             creator: metadata[4],
             tags: parseTags(metadata[2]),
             likes: parseNumber(metadata[0]),
             comments: parseNumber(metadata[1]),
-            description: `#shorts - creator on TikTok: ${link} - Find more on `,
-            music: removeIllegalChars( metadata[3])
+            description: `#shorts - creator on TikTok: ${link} \n\n\n https://www.tiktok.com/ \n\n\n\n\n\n`,
+            music: removeIllegalChars( metadata[3]),
+            code: Number(link.split("/video/")[1])
         }
 
         resolve(stats)
@@ -326,7 +394,7 @@ function parseTitle(title, musicRaw, creator) {
     }
 
     if (stringed.length > 4) {
-        return `${stringed} | ${music}`
+        return `${music}`
     }
     else {
         return `${creator} | ${music}`
@@ -380,7 +448,7 @@ function parseNumber(str) {
     return parseInt(str)
 }
 
-function getVideos(link) {
+function getVideos(link, maxVideos) {
     return new Promise(async resolve => {
         console.log("getting video links: " + link);
 
@@ -400,14 +468,22 @@ function getVideos(link) {
                 console.log("video-feed-item ->");
             })
 
-        const videos = await session.page.evaluate(() => {
+        await sleep(2000)
+        
+        await session.page.evaluate(() => {
+            window.scrollTo({ top: 20000, behavior: 'smooth' })
+        })
+
+        await sleep(2000)
+
+        const videos = await session.page.evaluate((maxVideos) => {
             const trendingVideos = document.getElementsByClassName("video-feed-item")
             const videoLinks = []
 
             console.log(trendingVideos);
             
             for (const trendingVideo of trendingVideos) {
-                if (videoLinks.length < 10) {
+                if (videoLinks.length < maxVideos) {
                     console.log(trendingVideo);
                     try {
                         const link = trendingVideo.childNodes[0].childNodes[0].childNodes[0].childNodes[0].href
@@ -426,7 +502,7 @@ function getVideos(link) {
             }
 
             return videoLinks
-        })
+        }, maxVideos)
 
         resolve(videos)
     })
@@ -442,12 +518,12 @@ function getTrends() {
             .catch(err => {
                 console.log("->");
             })
-        
-        console.log("waiting");
 
         await session.page.waitForSelector(".discover-list")
+            .catch(err => {
+                console.log(".discover-list ->");
+            })
 
-        console.log("page loaded");
 
         const links = await session.page.evaluate(() => {
             const trends = document.getElementsByClassName("discover-list")[0].children
