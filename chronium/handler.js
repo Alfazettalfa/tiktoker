@@ -1,9 +1,10 @@
 const cp = require("child_process")
-const fs = require("fs")
+const fs = require("fs-extra");
 var kill  = require('tree-kill');
 
 var scraper
 const crashed = []
+var lastOutput = Date.now()
 
 function sleep(ms) {
     return new Promise(resolve => {
@@ -13,13 +14,30 @@ function sleep(ms) {
     })
 }
 
+function checkOutputActivity() {
+    const maxDiff = 60 * 15
+
+    setInterval(() => {
+        const tDiff = (Date.now() - lastOutput) / 1000
+
+        if (tDiff > maxDiff) {
+            console.log(`No output since ${tDiff}, restarting...`);
+            init()
+        }
+    }, 1000);
+}
+
 async function init() {
+    //await run("sudo rm -r /tmp/*")
+    var lastLog = ""
+
     if (scraper != undefined) {
         console.log("[handler] Killing scraper...");
         restarting = true
+        crashed.push(scraper.pid)
 
         await kill(scraper.pid);
-        await sleep(3000)
+        await sleep(5000)
     }
 
     try {
@@ -38,8 +56,8 @@ async function init() {
             data = data.replace(/\n/g, "")
         }
         
-        //console.log(data.replace(/\n/g, '/n'));
-
+        lastOutput = Date.now()
+        lastLog = data
         console.log(`[${crashed.length} | ${scraper.pid}] > ${data}`);
     });
 
@@ -49,13 +67,13 @@ async function init() {
             data = data.replace(/\n/g, "")
         }
 
-        console.log(`[${crashed.length} | ${scraper.pid}] > ${data}`);
-
         if (!crashed.includes(scraper.pid) && !data.includes("Possible EventEmitter memory leak detected.")) {
+            console.log(`[${crashed.length} | ${scraper.pid}] > ${data}`);
+            
+            fs.appendFileSync("./data/errors.txt", lastLog)
             fs.appendFileSync("./data/errors.txt", data)
             fs.appendFileSync("./data/errors.txt", "\n\n---------------------------------------------------------------------------------------\n\n")
             
-            crashed.push(scraper.pid)
             init()
         }
     })
@@ -66,10 +84,14 @@ async function init() {
         if (data.match(/\n/g).length == 1) {
             data = data.replace(/\n/g, "")
         }
-        fs.appendFileSync("./data/errors.txt", "\n\n--------------------------stdout err-----------------------------------------------\n\n")
-        s.appendFileSync("./data/errors.txt", data)
-        fs.appendFileSync("./data/errors.txt", "\n\n--------------------------stdout err end-----------------------------------------------\n\n")
 
+        if (!crashed.includes(scraper.pid) && !data.includes("Possible EventEmitter memory leak detected.")) {
+            console.log(`[${crashed.length} | ${scraper.pid}] > ${data}`);
+
+            fs.appendFileSync("./data/errors.txt", "\n\n--------------------------stdout err-----------------------------------------------\n\n")
+            fs.appendFileSync("./data/errors.txt", data)
+            fs.appendFileSync("./data/errors.txt", "\n\n--------------------------stdout err end-----------------------------------------------\n\n")
+        }
     })
 }
 
@@ -81,4 +103,19 @@ function spawner(command) {
     return process
 }
 
+function run(command) {
+    return new Promise(resolve => {
+        cp.exec(command, (err, stdout, stderr) => {
+            if (err) {
+                console.log(stdout, stderr);
+            }
+
+            console.log(stdout)
+
+            resolve()
+        });
+    })
+}
+
 init()
+//checkOutputActivity()

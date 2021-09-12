@@ -1,8 +1,8 @@
 const puppeteer = require('puppeteer-extra')
 const StealthPlugin = require('puppeteer-extra-plugin-stealth')
+const fs = require("fs")
 
 const captcha = require("./captcha")
-const registry = require("./registry")
 const trends = require('./trends')
 
 puppeteer.use(StealthPlugin())
@@ -18,7 +18,7 @@ module.exports = {
                 args: [
                     '--no-sandbox',
                     "--remote-debugging-port=0",
-                    `--window-size=900,900`,
+                    `--window-size=800,800`,
                     //"--auto-open-devtools-for-tabs"
                 ]
             })
@@ -54,9 +54,10 @@ module.exports = {
 
             if (mode == "trends") {
                 const currentTrends = await trends.songs()
-                const chosenTrend = currentTrends[Math.round(Math.random() * currentTrends.length - 1)]
+                const seed = Math.round(Math.random() * (currentTrends.length - 1))
+                const chosenTrend = currentTrends[seed]
 
-                links = await getVideos(chosenTrend.link, 10)
+                links = await getVideos(chosenTrend.link, 8)
             }
 
             if (mode == "startpage") {
@@ -67,6 +68,7 @@ module.exports = {
             
             if (links.length > 0) {
                 const videos = []
+                const randomizer = 5
 
                 for (const link of links) {
                     const video = await analyzeVideo(link)
@@ -74,17 +76,15 @@ module.exports = {
                     console.log("title: ", video.title);
                     console.log("likes: ", video.likes);
 
-                    //registry.register(video)
-
                     videos.push(video)
                 }
 
-                const mostLikedVideo = mostLiked(videos)
-                const source = await getVideoSource(mostLikedVideo.link)
+                const chosenVideo = chooseVideo(videos, randomizer)
+                const source = await getVideoSource(chosenVideo.link)
                 const video = await downloadVideo(source)
 
                 resolve({
-                    metadata: mostLikedVideo,
+                    metadata: chosenVideo,
                     buffer: video
                 })
             }
@@ -98,7 +98,7 @@ module.exports = {
             console.log("closing scraper");
             await browser.close()
                 .catch(err => {
-                    console.log(err);
+                    console.log(`error on closing chrome: ${err}`);
                 })
 
             console.log("Scraper Closed");
@@ -149,57 +149,6 @@ module.exports = {
             resolve(videos)
         })
     }
-}
-
-//not used for now, maybe later
-function getCompilation(url, duration) {
-    console.log(`collecting videos \n target duration: ${duration}s \n link: ${url}`);
-
-    return new Promise(async resolve => {
-        session.page.goto(url)
-            .catch(err => {
-                console.log(err);
-            })
-        await session.page.waitForNavigation({ timeout: 5000})
-            .catch(err => {
-                console.log("->");
-            })
-
-        await captcha.isBusy()
-
-        await session.page.waitForSelector(".video-feed-item")
-            .catch(err => {
-                console.log("video-feed-item ->");
-            })
-
-        //waiting for pae to load, then scroll and wait again for videos to render
-        await session.page.evaluate(() => {
-            window.scrollTo({ top: 10000, behavior: 'smooth' })
-        })
-
-        await sleep(2000)
-        const registeredVideos = JSON.stringify(registry.get("type:compilation"))
-
-        const videos = await session.page.evaluate((registeredVideos) => {
-            const trendingVideos = document.getElementsByClassName("video-feed-item")
-            const videoLinks = []
-            
-            for (const video of trendingVideos) {
-                try {
-                    const link = video.childNodes[0].childNodes[0].childNodes[0].childNodes[0].href
-
-                    if (!registeredVideos.includes(link)) {
-                        videoLinks.push(link)
-                    }
-                }   
-                catch {
-                    console.log("Failed to aquire video link, skipping...");
-                }
-            }
-
-            return videoLinks
-        }, registeredVideos)
-    })
 }
 
 function activeTab() {
@@ -280,7 +229,7 @@ function downloadVideo(source) {
                     resolve(false)
                 }
             })
-        }, source)
+        }, source)  
 
         
         const buffer = Buffer.from(response , 'binary');
@@ -295,7 +244,13 @@ function getVideoSource(url) {
     return new Promise(async resolve => {
         console.log("getting video source of " + url);
 
-        session.page.goto(url)
+        try {
+            session.page.goto(url)
+        }
+        catch {
+            resolve(false)
+            return
+        }
         await session.page.waitForNavigation({ timeout: 5000})
             .catch(err => {
                 console.log("->");
@@ -313,12 +268,13 @@ function getVideoSource(url) {
     })
 }
 
-function mostLiked(videos) {
+function chooseVideo(videos) {
     let top = false
     let max = 0
+    const prevUploads = JSON.parse(fs.readFileSync("./data/uploaded.json"))
 
     videos.forEach(video => {
-        if (video.likes > max) {
+        if (video.likes > max && !prevUploads.includes(video.link)) {
             max = video.likes
             top = video
         }
@@ -327,49 +283,71 @@ function mostLiked(videos) {
     return top
 }
 
+function dynamicSort(property) {
+    var sortOrder = 1;
+    if(property[0] === "-") {
+        sortOrder = -1;
+        property = property.substr(1);
+    }
+    return function (a,b) {
+        /* next line works with strings and numbers, 
+         * and you may want to customize it to your needs
+         */
+        var result = (a[property] < b[property]) ? -1 : (a[property] > b[property]) ? 1 : 0;
+        return result * sortOrder;
+    }
+}
+
 function analyzeVideo(link) {
     console.log(`analyzing: ${link}`);
 
     return new Promise(async resolve => {
-        session.page.goto(link)
-        await session.page.waitForNavigation({ timeout: 3000})
-            .catch(err => {
-                console.log("->");
+        try {
+            session.page.goto(link)
+            await session.page.waitForNavigation({ timeout: 3000})
+                .catch(err => {
+                    console.log("->");
+                })
+            
+            await session.page.waitForSelector('.pc-action-bar')
+
+            const metadata = await session.page.evaluate(() => {
+                const panel = document.getElementsByClassName("pc-action-bar")[0]
+                const videoTag = document.getElementsByTagName("video")[0]
+
+                const likes = panel.children[0].children[1].innerHTML
+                const comments = panel.children[1].children[1].innerHTML
+                const videoTitle = document.title.split(document.title.indexOf("#"))[0]
+                const videoMusic = document.getElementsByClassName("music-title-decoration")[0].innerText
+                const creator = document.getElementsByClassName("author-uniqueId")[0].childNodes[0].textContent.replace(/"/g, "")
+                const source = videoTag.src
+
+                console.log(likes, comments);
+
+                return [likes, comments, videoTitle, videoMusic, creator, source]
             })
-        
-        await session.page.waitForSelector('.pc-action-bar')
-
-        const metadata = await session.page.evaluate(() => {
-            const panel = document.getElementsByClassName("pc-action-bar")[0]
-            const videoTag = document.getElementsByTagName("video")[0]
-
-            const likes = panel.children[0].children[1].innerHTML
-            const comments = panel.children[1].children[1].innerHTML
-            const videoTitle = document.title.split(document.title.indexOf("#"))[0]
-            const videoMusic = document.getElementsByClassName("music-title-decoration")[0].innerText
-            const creator = document.getElementsByClassName("author-uniqueId")[0].childNodes[0].textContent.replace(/"/g, "")
-            const source = videoTag.src
-
-            console.log(likes, comments);
-
-            return [likes, comments, videoTitle, videoMusic, creator, source]
-        })
 
 
-        const stats = {
-            link: link,
-            source: metadata[5],
-            title: parseTitle(metadata[2], metadata[3], metadata[4]),
-            creator: metadata[4],
-            tags: parseTags(metadata[2]),
-            likes: parseNumber(metadata[0]),
-            comments: parseNumber(metadata[1]),
-            description: `#shorts - creator on TikTok: ${link} \n\n\n https://www.tiktok.com/ \n\n\n\n\n\n`,
-            music: removeIllegalChars( metadata[3]),
-            code: Number(link.split("/video/")[1])
+            const stats = {
+                link: link,
+                source: metadata[5],
+                title: parseTitle(metadata[2], metadata[3], metadata[4]),
+                creator: metadata[4],
+                tags: parseTags(metadata[2]),
+                likes: parseNumber(metadata[0]),
+                comments: parseNumber(metadata[1]),
+                description: `#shorts - creator on TikTok: ${link} \n\n\n https://www.tiktok.com/ \n\n\n\n\n\n`,
+                music: removeIllegalChars( metadata[3]),
+                code: Number(link.split("/video/")[1])
+            }
+
+            resolve(stats)
         }
-
-        resolve(stats)
+        catch {
+            resolve({
+                likes: 0,
+            })
+        }
     })
 }
 
@@ -455,20 +433,12 @@ function getVideos(link, maxVideos) {
         session.page.goto(link)
             .catch(err => {
                 console.log(err);
-            })
-        await session.page.waitForNavigation({ timeout: 5000})
-            .catch(err => {
-                console.log("->");
-            })
-
-        await captcha.isBusy()
-        
-        await session.page.waitForSelector(".video-feed-item")
+            })   
             .catch(err => {
                 console.log("video-feed-item ->");
             })
-
-        await sleep(2000)
+        
+        await captcha.isBusy()
         
         await session.page.evaluate(() => {
             window.scrollTo({ top: 20000, behavior: 'smooth' })

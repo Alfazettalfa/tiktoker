@@ -3,7 +3,6 @@ const fs = require('fs');
 const scraper = require("./src/scraper")
 const uploader = require("./src/uploader");
 const compilation = require("./src/compilations");
-const { resolve4 } = require('dns');
 
 
 const headless = false
@@ -27,10 +26,10 @@ async function init() {
         await uploadShort(mode)
 
         if (mode == "startpage") {
-            //mode = "trends"
+            mode = "trends"
         }
         else {
-            //mode = "startpage"
+            mode = "startpage"
         }
     }
 }
@@ -75,12 +74,10 @@ async function uploadShort(mode) {
         await scraper.close()
 
         if (video != false) {
-            if (video.metadata.likes > 10000) {
+            if (video.metadata.likes > 100000) {
                 if (!prevUploads.includes(video.metadata.link)) {
                     const links = await uploader.upload(video.metadata)
                     
-                    console.log("Video Uploaded, waiting one Hour");
-
                     if (links[0] != false) {
                         prevUploads.push(video.metadata.link)
                     }
